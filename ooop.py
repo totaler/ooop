@@ -147,9 +147,6 @@ class OOOP:
         """ return ids that match with 'query' """
         return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'search', query)
         
-    def custom_execute(self, model, ids, remote_method, data):
-        return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, ids, remote_method, data)
-
     def all(self, model):
         """ return all ids """
         return self.search(model, [])
