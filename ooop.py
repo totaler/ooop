@@ -82,6 +82,7 @@ class objectsock_mock():
             return o_model.read(self.cr, uid, vals)
         elif action == 'search':
             return o_model.search(self.cr, uid, vals)
+        
 
 class OOOP:
     """ Main class to manage xml-rpc comunitacion with openerp-server """
@@ -145,6 +146,9 @@ class OOOP:
     def search(self, model, query):
         """ return ids that match with 'query' """
         return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'search', query)
+        
+    def custom_execute(self, model, ids, remote_method, data):
+        return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, ids, remote_method, data)
 
     def all(self, model):
         """ return all ids """
@@ -168,7 +172,7 @@ class OOOP:
 
     def set_model(self, model, r={}, deep=None):
         """docstring for set_model"""
-        if not r.has_key(model):
+        if not model in r.keys():
             r[model] = {
                 'name': self.normalize_model_name(model), 
                 'links': {}, 
@@ -178,9 +182,9 @@ class OOOP:
             for fld in flds:
                 r[model]['fields'].append((fld["name"], fld["ttype"]))
                 if fld["ttype"] in ('one2many', 'many2one', 'many2many'):
-                    if deep > 0 and not r[model]['links'].has_key(fld['relation']):
-                        r[model]['links'][fld['relation']] = fld['ttype']
-                        r = self.set_model(fld["relation"], r, deep-1)
+                    if deep > 0 and not fld['relation'] in r[model]['links'].keys():
+                       r[model]['links'][fld['relation']] = fld['ttype']
+                       r = self.set_model(fld["relation"], r, deep-1)
             
         return r
         
@@ -426,7 +430,7 @@ class Data(object):
         
         self.INSTANCES['%s:%s' % (self._model, self._ref)] = self
         
-        if self._ooop.fields.has_key(self._model):
+        if self._model in self._ooop.fields.keys():
             self.fields = self._ooop.fields[self._model]
         else:
             fields = self._manager.fields_get()
@@ -452,7 +456,8 @@ class Data(object):
     def init_values(self, *args, **kargs):
         """ initial values for object """
         keys = kargs.keys()
-        for name,ttype,relation in [(i['name'],i['ttype'],i['relation']) for i in self.fields.values()]:
+        for i in self.fields.values():
+            name,ttype,relation = i['name'],i['ttype'],i['relation']
             if ttype in ('one2many', 'many2many'): # these types use a list of objects
                 if name in keys:
                     self.__dict__[name] = List(self._manager, kargs[name], data=self, model=relation)
@@ -478,7 +483,8 @@ class Data(object):
         if not data:
             raise AttributeError('Object %s(%i) doesn\'t exist.' % (self._model, self._ref))
         self.__data = data
-        for name,ttype,relation in [(i['name'],i['ttype'],i['relation']) for i in self.fields.values()]:
+        for i in self.fields.values():
+            name,ttype,relation = i['name'],i['ttype'],i['relation']
             if not ttype in ('one2many', 'many2one', 'many2many'):
                 hasattr(self,name) # use __getattr__ to trigger load
             else:
@@ -486,7 +492,7 @@ class Data(object):
 
     def __setattr__(self, field, value):
         if 'fields' in self.__dict__:
-            if self.fields.has_key(field):
+            if field in self.fields.keys():
                 ttype = self.fields[field]['ttype']
                 if ttype =='many2one' and value:
                     self.INSTANCES['%s:%s' % (self._model, value._ref)] = value
@@ -498,13 +504,13 @@ class Data(object):
         #    ttype = self.fields[self._model][field]['ttype']
         #    if ttype in ('many2one', 'many2many'):
         #        print "FIELD MANY2..."
-        if self.__dict__.has_key(field):
+        if field in self.__dict__.keys():
             return self.__dict__[field]
         
         try:
             data = {field: self.__data[field]}
         except:
-            if self.fields.has_key(field):
+            if field in self.fields.keys():
                 data = self._ooop.read(self._model, self._ref, [field])
             else:
                 # Try a custom function
@@ -517,13 +523,14 @@ class Data(object):
         if ttype == 'many2one':
             if data[name]: # TODO: review this
                 self.__dict__['__%s' % name] = data[name]
-                if self.INSTANCES.has_key('%s:%i' % (relation, data[name][0])):
-                    self.__dict__[name] = self.INSTANCES['%s:%s' % (relation, data[name][0])]
+                key = '%s:%i' % (relation, data[name][0])
+                if key in self.INSTANCES.keys():
+                    self.__dict__[name] = self.INSTANCES[key]
                 else:
                     # TODO: use a Manager instance, not Data
                     instance = Data(self._manager, data[name][0], relation, data=self)
                     self.__dict__[name] = instance
-                    self.INSTANCES['%s:%s' % (relation, data[name][0])] = instance
+                    self.INSTANCES[key] = instance
             else:
                 self.__dict__[name] = None # TODO: empty openerp data object
         elif ttype in ('one2many', 'many2many'):
@@ -531,7 +538,8 @@ class Data(object):
                 self.__dict__['__%s' % name] = data[name]
                 self.__dict__[name] = List(self._manager, data=self, model=relation)
                 for i in xrange(len(data[name])):
-                    if self.INSTANCES.has_key('%s:%i' % (relation, data[name][i])):
+                    key = '%s:%i' % (relation, data[name][i])
+                    if key in self.INSTANCES.keys():
                         self.__dict__[name].append(self.INSTANCES['%s:%s' % (relation, data[name][i])])
                     else:
                         # TODO: use a Manager instance, not Data
@@ -554,15 +562,16 @@ class Data(object):
             return: object id """
         
         data = {}
-        for name,ttype,relation in [(i['name'],i['ttype'],i['relation']) for i in self.fields.values()]:
-            if self.__dict__.has_key(name): # else keep values in original object
+        for i in self.fields.values():
+            name,ttype,relation = i['name'],i['ttype'],i['relation']
+            if name in self.__dict__.keys(): # else keep values in original object
                 if not '2' in ttype:
                     if ttype in ('boolean', 'float', 'integer') or \
                     self.__dict__[name]: # many2one, one2many, many2many
                         data[name] = self.__dict__[name]
                 elif ttype in ('one2many', 'many2many'):
                     if len(self.__dict__[name]) > 0:
-                        data[name] = [(6, 0, [i._ref for i in self.__dict__[name]])]
+                        data[name] = [(6, 0, [i.save() for i in self.__dict__[name]])]
                         # update __name and INSTANCES (cache)
                         self.__dict__['__%s' % name] = [i._ref for i in self.__dict__[name]] # REVIEW: two loops?
                         for i in self.__dict__[name]:
