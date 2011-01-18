@@ -180,8 +180,8 @@ class OOOP:
                 r[model]['fields'].append((fld["name"], fld["ttype"]))
                 if fld["ttype"] in ('one2many', 'many2one', 'many2many'):
                     if deep > 0 and not fld['relation'] in r[model]['links'].keys():
-                       r[model]['links'][fld['relation']] = fld['ttype']
-                       r = self.set_model(fld["relation"], r, deep-1)
+                        r[model]['links'][fld['relation']] = fld['ttype']
+                        r = self.set_model(fld["relation"], r, deep-1)
             
         return r
         
