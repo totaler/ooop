@@ -457,13 +457,13 @@ class Data(object):
             name,ttype,relation = i['name'],i['ttype'],i['relation']
             if ttype in ('one2many', 'many2many'): # these types use a list of objects
                 if name in keys:
-                    self.__dict__[name] = List(self._manager, kargs[name], data=self, model=relation)
+                    self.__dict__[name] = List(Manager(relation, self._ooop), kargs[name], data=self, model=relation)
                 else:
-                    self.__dict__[name] = List(self._manager, data=self, model=relation)
+                    self.__dict__[name] = List(Manager(relation, self._ooop), data=self, model=relation)
             elif ttype == 'many2one':
                 if name in keys:
                     # manager, ref=None, model=None, copy=False
-                    instance = Data(self._manager, kargs[name], relation)
+                    instance = Data(Manager(relation, self._ooop), kargs[name], relation)
                     self.INSTANCES['%s:%s' % (relation, kargs[name])] = instance
                     self.__dict__[name] = instance
                 else:
