@@ -31,9 +31,9 @@ try:
 except:
     pydot = False
 
-__author__ = "Pedro Gracia <lasarux@neuroomante.com>"
+__author__ = "Pedro Gracia <pedro.gracia@impulzia.com>"
 __license__ = "GPLv3+"
-__version__ = "0.2.0"
+__version__ = "0.2.2"
 
 
 OOOPMODELS = 'ir.model'
@@ -54,6 +54,9 @@ OPERATORS = {
     'not_in': 'not in',
     'child_of': 'child of',
 }
+
+def remove(object):
+    del object
 
 class objectsock_mock():
     """mock for objectsock to be able to use the OOOP as a module inside of openerp"""
@@ -87,13 +90,16 @@ class objectsock_mock():
 class OOOP:
     """ Main class to manage xml-rpc comunitacion with openerp-server """
     def __init__(self, user='admin', pwd='admin', dbname='openerp', 
-                 uri='http://localhost', port=8069, debug=False, **kwargs):
+                 uri='http://localhost', port=8069, debug=False, 
+                 exe=False, active=True, **kwargs):
         self.user = user       # default: 'admin'
         self.pwd = pwd         # default: 'admin'
         self.dbname = dbname   # default: 'openerp'
         self.uri = uri
         self.port = port
         self.debug = debug
+        self.exe = exe
+        self.active = active
         self.commonsock = None
         self.objectsock = None
         self.reportsock = None
@@ -121,6 +127,8 @@ class OOOP:
         return self.commonsock.login(dbname, user, pwd)
 
     def execute(self, model, *args):
+        if self.debug:
+            print "DEBUG [execute]:", model, args
         return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, *args)
 
     def create(self, model, data):
@@ -147,6 +155,12 @@ class OOOP:
         """ return ids that match with 'query' """
         return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'search', query)
         
+    # TODO: verify if remove this
+    def custom_execute(self, model, ids, remote_method, data):
+        if self.debug:
+            print "DEBUG [custom_execute]:", self.dbname, self.uid, self.pwd, model, args
+        return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, ids, remote_method, data)
+
     def all(self, model):
         """ return all ids """
         return self.search(model, [])
@@ -328,13 +342,9 @@ class List:
         return self.__getitem__(self.index)
         
     def delete(self):
-        print self.parent
         if self.parent:
             objects = self.parent.objects
             self.parent.objects = objects[:self.low] + objects[self.high:]
-        print self.objects
-        # print "hi"
-        # return True
         return self.manager._ooop.unlink(self.model, self.objects)
     
     def append(self, value):
@@ -365,21 +375,18 @@ class Manager:
     def __init__(self, model, ooop):
         self._model = model
         self._ooop = ooop
-        #self.INSTANCES = {}
         
     def __getattr__(self, name):
         return lambda *a: self._ooop.execute(self._model, name, *a)
 
     def get(self, ref): # TODO: only ids?
         return Data(self, ref)
-        #self.INSTANCES['%s:%s' % (self.model, ref)] = instance
 
     def new(self, *args, **kargs):
         return Data(self, *args, **kargs)
         
     def copy(self, ref):
         return Data(self, ref, copy=True)
-        #self.INSTANCES['%s:%s' % (self.model, ref)] = instance
 
     def all(self):
         ids = self._ooop.all(self._model)
@@ -448,13 +455,17 @@ class Data(object):
             default_values = {}
             field_names = self.fields.keys()
             default_values = self._manager.default_get(field_names)
+            # active by default ?
+            if self._ooop.active:
+                default_values['active'] = True
+            default_values.update(**kargs) # initial values from caller
             self.init_values(**default_values)
 
     def init_values(self, *args, **kargs):
         """ initial values for object """
         keys = kargs.keys()
         for i in self.fields.values():
-            name,ttype,relation = i['name'],i['ttype'],i['relation']
+            name, ttype, relation = i['name'], i['ttype'], i['relation']
             if ttype in ('one2many', 'many2many'): # these types use a list of objects
                 if name in keys:
                     self.__dict__[name] = List(Manager(relation, self._ooop), kargs[name], data=self, model=relation)
@@ -481,11 +492,22 @@ class Data(object):
             raise AttributeError('Object %s(%i) doesn\'t exist.' % (self._model, self._ref))
         self.__data = data
         for i in self.fields.values():
-            name,ttype,relation = i['name'],i['ttype'],i['relation']
+            name, ttype, relation = i['name'], i['ttype'], i['relation']
             if not ttype in ('one2many', 'many2one', 'many2many'):
                 hasattr(self,name) # use __getattr__ to trigger load
             else:
                 pass # TODO: to load related fields as proxies to objects
+
+    def __print__(self, sort=True):
+        if sort:
+            fields = sorted(self.fields)
+        else:
+            fields = self.fields
+        for i in fields:
+            try:
+                print "%s: %s" % (i, self.__dict__[i])
+            except:
+                pass
 
     def __setattr__(self, field, value):
         if 'fields' in self.__dict__:
@@ -497,24 +519,22 @@ class Data(object):
 
     def __getattr__(self, field):
         """ put values into object dynamically """
-        #if self.fields[self._model].has_key(field):
-        #    ttype = self.fields[self._model][field]['ttype']
-        #    if ttype in ('many2one', 'many2many'):
-        #        print "FIELD MANY2..."
         if field in self.__dict__.keys():
             return self.__dict__[field]
-        
+
         try:
             data = {field: self.__data[field]}
         except:
             if field in self.fields.keys():
                 data = self._ooop.read(self._model, self._ref, [field])
-            else:
-                # Try a custom function
-                return lambda *a: self._ooop.execute(self._model, field,
-                                                     [self._ref], *a)
-
-        name = self.fields[field]['name']
+            # Try a custom function
+            if self._ooop.exe:
+                return lambda *a: self._ooop.execute(
+                    self._model, field, [self._ref], *a)
+        try:
+            name = self.fields[field]['name']
+        except:
+            raise NameError('field \'%s\' is not defined' % field)
         ttype = self.fields[field]['ttype']
         relation = self.fields[field]['relation']
         if ttype == 'many2one':
@@ -554,10 +574,10 @@ class Data(object):
             # axelor conector workaround
             if type(data) == types.ListType:
                 data = data[0]
-                
             self.__dict__[name] = data[name]
-        
-        return self.__dict__[name]
+
+        if self.__dict__[name]:
+            return self.__dict__[name]
     
     def save(self):
         """ save attributes object data into openerp
@@ -565,7 +585,7 @@ class Data(object):
         
         data = {}
         for i in self.fields.values():
-            name,ttype,relation = i['name'],i['ttype'],i['relation']
+            name, ttype, relation = i['name'], i['ttype'], i['relation']
             if name in self.__dict__.keys(): # else keep values in original object
                 if not '2' in ttype:
                     if ttype in ('boolean', 'float', 'integer') or \
@@ -602,8 +622,9 @@ class Data(object):
     def delete(self):
         if self._ref > 0:
             self._ooop.unlink(self._model, self._ref)
-        else:
-            pass # TODO
+        #else:
+        #    pass # TODO
+        remove(self)
 
     # TODO: to develop a more clever save function
     def save_all(self): 
