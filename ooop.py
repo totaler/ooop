@@ -588,9 +588,7 @@ class Data(object):
             name, ttype, relation = i['name'], i['ttype'], i['relation']
             if name in self.__dict__.keys(): # else keep values in original object
                 if not '2' in ttype:
-                    if ttype in ('boolean', 'float', 'integer') or \
-                    self.__dict__[name]: # many2one, one2many, many2many
-                        data[name] = self.__dict__[name]
+                    data[name] = self.__dict__[name]
                 elif ttype in ('one2many', 'many2many'):
                     if len(self.__dict__[name]) > 0:
                         data[name] = [(6, 0, [i.save() for i in self.__dict__[name]])]
@@ -604,6 +602,8 @@ class Data(object):
                         # update __name and INSTANCES (cache)
                         self.__dict__['__%s' % name] = [self.__dict__[name]._ref, self.__dict__[name].name]
                         self.INSTANCES['%s:%s' % (relation, self.__dict__[name]._ref)] = self.__dict__[name]
+                    else:
+                        data[name] = self.__dict__[name]
 
         if self._ooop.debug:
             print ">>> data: ", data
