@@ -57,31 +57,20 @@ OPERATORS = {
 
 class objectsock_mock():
     """mock for objectsock to be able to use the OOOP as a module inside of openerp"""
-    def __init__(self, parent, cr):
-        self.parent = parent
+    def __init__(self, pool, cr):
+        self.pool = pool
         self.cr = cr
     
     def execute(self, *args):
         """mocking execute function"""
-        if len(args) == 7:
-            (dbname, uid, pwd, model, action, vals, fields) = args
-        elif len(args) == 6:
-            (dbname, uid, pwd, model, action, vals) = args
-        
-        o_model = self.parent.pool.get(model)
-        
-        if action == 'create':
-            return o_model.create(self.cr, uid, vals)
-        elif action == 'unlink':
-            return o_model.unlink(self.cr, uid, vals)
-        elif action == 'write':
-            return o_model.write(self.cr, uid, vals, fields)
-        elif action == 'read' and len(args) == 7:
-            return o_model.read(self.cr, uid, vals, fields)
-        elif action == 'read':
-            return o_model.read(self.cr, uid, vals)
-        elif action == 'search':
-            return o_model.search(self.cr, uid, vals)
+        uid = args[1]
+        model = args[3]
+        action = args[4]
+        o_model = self.pool.get(model)
+        newargs = (self.cr, uid, )
+        if args[5:]:
+            newargs += args[5:]
+        return getattr(o_model, action)(*newargs)
         
 
 class OOOP:
@@ -106,7 +95,7 @@ class OOOP:
         #has to be uid, cr, parent (the openerp model to get the pool)
         if len(kwargs) == 3:
             self.uid = kwargs['uid']
-            self.objectsock = objectsock_mock(kwargs['parent'], kwargs['cr'])
+            self.objectsock = objectsock_mock(kwargs['pool'], kwargs['cr'])
         else:
             self.connect()
         
