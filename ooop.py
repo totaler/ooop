@@ -131,16 +131,22 @@ class OOOP:
         if self.transaction_id:
             return self.transsock.commit(self.dbname, self.transaction_id,
                                          self.uid, self.pwd)
+        else:
+            return self.objectsock.cr.commit()
 
     def rollback(self):
         if self.transaction_id:
             return self.transsock.rollback(self.dbname, self.transaction_id,
                                            self.uid, self.pwd)
+        else:
+            return self.objectsock.cr.rollback()
 
     def close(self):
         if self.transaction_id:
             return self.transsock.close(self.dbname, self.transaction_id,
                                         self.uid, self.pwd)
+        else:
+            return self.objectsock.cr.close()
 
     def login(self, dbname, user, pwd):
         self.commonsock = xmlrpclib.ServerProxy('%s:%i/xmlrpc/common' % (self.uri, self.port))
