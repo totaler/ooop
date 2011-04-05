@@ -83,29 +83,14 @@ class objectsock_mock():
     
     def execute(self, *args, **kargs):
         """mocking execute function"""
-        if len(args) == 7:
-            (dbname, uid, pwd, model, action, vals, fields) = args
-        elif len(args) == 6:
-            (dbname, uid, pwd, model, action, vals) = args
-        elif len(args) == 5:
-            (dbname, uid, pwd, model, action) = args
-        
-        _model = self.parent.pool.get(model)
-        
-        if action == 'create':
-            return _model.create(self.cr, uid, vals)
-        elif action == 'unlink':
-            return _model.unlink(self.cr, uid, vals)
-        elif action == 'write':
-            return _model.write(self.cr, uid, vals, fields)
-        elif action == 'read' and len(args) == 7:
-            return _model.read(self.cr, uid, vals, fields)
-        elif action == 'read':
-            return _model.read(self.cr, uid, vals)
-        elif action == 'search':
-            return _model.search(self.cr, uid, vals)
-        else:
-            return getattr(_model, action)(self.cr, uid) # is callable
+        uid = args[1]
+        model = args[3]
+        action = args[4]
+        o_model = self.pool.get(model)
+        newargs = (self.cr, uid, )
+        if args[5:]:
+            newargs += args[5:]
+        return getattr(o_model, action)(*newargs)
         
 
 class OOOP:
