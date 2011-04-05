@@ -24,6 +24,7 @@ import xmlrpclib
 import time
 import base64
 import types
+from datetime import datetime, date
 
 # check if pydot is installed
 try:
@@ -33,7 +34,7 @@ except:
 
 __author__ = "Pedro Gracia <pedro.gracia@impulzia.com>"
 __license__ = "GPLv3+"
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 
 OOOPMODELS = 'ir.model'
@@ -58,33 +59,53 @@ OPERATORS = {
 def remove(object):
     del object
 
+# http://stackoverflow.com/questions/1305532/convert-python-dict-to-object (last one)
+class dict2obj(dict):
+    def __init__(self, dict_):
+        super(dict2obj, self).__init__(dict_)
+        for key in self:
+            item = self[key]
+            if isinstance(item, list):
+                for idx, it in enumerate(item):
+                    if isinstance(it, dict):
+                        item[idx] = dict2obj(it)
+            elif isinstance(item, dict):
+                self[key] = dict2obj(item)
+
+    def __getattr__(self, key):
+        return self[key]
+
 class objectsock_mock():
     """mock for objectsock to be able to use the OOOP as a module inside of openerp"""
     def __init__(self, parent, cr):
         self.parent = parent
         self.cr = cr
     
-    def execute(self, *args):
+    def execute(self, *args, **kargs):
         """mocking execute function"""
         if len(args) == 7:
             (dbname, uid, pwd, model, action, vals, fields) = args
         elif len(args) == 6:
             (dbname, uid, pwd, model, action, vals) = args
+        elif len(args) == 5:
+            (dbname, uid, pwd, model, action) = args
         
-        o_model = self.parent.pool.get(model)
+        _model = self.parent.pool.get(model)
         
         if action == 'create':
-            return o_model.create(self.cr, uid, vals)
+            return _model.create(self.cr, uid, vals)
         elif action == 'unlink':
-            return o_model.unlink(self.cr, uid, vals)
+            return _model.unlink(self.cr, uid, vals)
         elif action == 'write':
-            return o_model.write(self.cr, uid, vals, fields)
+            return _model.write(self.cr, uid, vals, fields)
         elif action == 'read' and len(args) == 7:
-            return o_model.read(self.cr, uid, vals, fields)
+            return _model.read(self.cr, uid, vals, fields)
         elif action == 'read':
-            return o_model.read(self.cr, uid, vals)
+            return _model.read(self.cr, uid, vals)
         elif action == 'search':
-            return o_model.search(self.cr, uid, vals)
+            return _model.search(self.cr, uid, vals)
+        else:
+            return getattr(_model, action)(self.cr, uid) # is callable
         
 
 class OOOP:
@@ -133,26 +154,38 @@ class OOOP:
 
     def create(self, model, data):
         """ create a new register """
+        if self.debug:
+            print "DEBUG [create]:", model, data
         return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'create', data)
 
     def unlink(self, model, ids):
         """ remove register """
+        if self.debug:
+            print "DEBUG [unlink]:", model, ids
         return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'unlink', ids)
 
     def write(self, model, ids, value):
         """ update register """
+        if self.debug:
+            print "DEBUG [write]:", model, ids, value
         return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'write', ids, value)
 
     def read(self, model, ids, fields=[]):
         """ update register """
+        if self.debug:
+            print "DEBUG [read]:", model, ids, fields
         return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'read', ids, fields)
 
     def read_all(self, model, fields=[]):
         """ update register """
+        if self.debug:
+            print "DEBUG [read_all]:", model, fields
         return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'read', self.all(model), fields)
 
     def search(self, model, query):
         """ return ids that match with 'query' """
+        if self.debug:
+            print "DEBUG [search]:", model, query
         return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'search', query)
         
     # TODO: verify if remove this
@@ -161,9 +194,11 @@ class OOOP:
             print "DEBUG [custom_execute]:", self.dbname, self.uid, self.pwd, model, args
         return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, ids, remote_method, data)
 
-    def all(self, model):
+    def all(self, model, query=[]):
         """ return all ids """
-        return self.search(model, [])
+        if self.debug:
+            print "DEBUG [all]:", model, query
+        return self.search(model, query)
 
     def insert_items(self, model, data):
         """ insert items into database """
@@ -312,8 +347,9 @@ class OOOP:
 
 # reference: http://www.java2s.com/Code/Python/Class/MyListinitaddmulgetitemlengetslice.htm
 class List:
-    """ An 'intelligent' list """
+    """ An 'smart' list """
     #FIXME: reorder args
+    #TODO: cache
     def __init__(self, manager, objects=None, parent=None, 
                  low=None, high=None, data=None, model=None):
         self.manager = manager  # List or Manager instance
@@ -388,11 +424,32 @@ class Manager:
     def copy(self, ref):
         return Data(self, ref, copy=True)
 
-    def all(self):
+    def read(self, ids, fields=[]):
+        data = self._ooop.read(self._model, ids, fields)
+        res = []
+        for item in data:
+            row = {'id': item['id']}
+            for i in fields:
+                row[i] = item[i]
+            res.append(dict2obj(row))
+        return res
+
+    def all(self, fields=[], offset=0, limit=999999, as_list=False):
         ids = self._ooop.all(self._model)
+        if not ids: # CHECKTHIS
+            return []
+        data = self._ooop.read(self._model, ids[offset:limit], fields)
+        if as_list:
+            res = []
+            for item in data:
+                row = {'id': item['id']}
+                for i in fields:
+                    row[i] = item[i]
+                res.append(dict2obj(row))
+            return res
         return List(self, ids) #manager, object ids
 
-    def filter(self, *args, **kargs):
+    def filter(self, fields=[], as_list=False, **kargs):
         q = [] # query dict
         for key, value in kargs.items():
             if not '__' in key:
@@ -402,7 +459,10 @@ class Manager:
                 op = OPERATORS[key[i+2:]]
                 key = key[:i]
             q.append(('%s' % key, op, value))
-        return List(self, self._ooop.search(self._model, q))
+        ids = self._ooop.search(self._model, q)
+        if as_list:
+            return self.read(ids, fields)
+        return List(self, ids)
 
     def exclude(self, *args, **kargs):
         pass # TODO
@@ -418,7 +478,7 @@ class Manager:
 
 
 class Data(object):
-    def __init__(self, manager, ref=None, model=None, copy=False, *args, **kargs):
+    def __init__(self, manager, ref=None, model=None, copy=False, data=None, fields=[], *args, **kargs):
         if not model:
             self._model = manager._model # model name # FIXME!
         else:
@@ -426,6 +486,8 @@ class Data(object):
         self._manager = manager
         self._ooop = self._manager._ooop
         self._copy = copy
+        self._data = data
+        self._fields = fields
         self.INSTANCES = {}
         if ref:
             self._ref = ref
@@ -478,7 +540,7 @@ class Data(object):
                     self.INSTANCES['%s:%s' % (relation, kargs[name])] = instance
                     self.__dict__[name] = instance
                 else:
-                    self.__dict__[name] = False
+                    self.__dict__[name] = None
             else:
                 if name in keys:
                     self.__dict__[name] = kargs[name]
@@ -487,10 +549,13 @@ class Data(object):
 
     def get_values(self):
         """ get values of fields with no relations """
-        data = self._ooop.read(self._model, self._ref)
-        if not data:
-            raise AttributeError('Object %s(%i) doesn\'t exist.' % (self._model, self._ref))
-        self.__data = data
+        if not self._data:
+            data = self._ooop.read(self._model, self._ref, self._fields)
+            if not data:
+                raise AttributeError('Object %s(%i) doesn\'t exist.' % (self._model, self._ref))
+            else:
+                self._data = data
+
         for i in self.fields.values():
             name, ttype, relation = i['name'], i['ttype'], i['relation']
             if not ttype in ('one2many', 'many2one', 'many2many'):
@@ -504,17 +569,15 @@ class Data(object):
         else:
             fields = self.fields
         for i in fields:
-            try:
-                print "%s: %s" % (i, self.__dict__[i])
-            except:
-                pass
+            print "%s: %s" % (i, self.__getattr__(i))
 
     def __setattr__(self, field, value):
         if 'fields' in self.__dict__:
             if field in self.fields.keys():
                 ttype = self.fields[field]['ttype']
-                if ttype =='many2one' and value:
-                    self.INSTANCES['%s:%s' % (self._model, value._ref)] = value
+                if value:
+                    if ttype =='many2one':
+                        self.INSTANCES['%s:%s' % (self._model, value._ref)] = value
         self.__dict__[field] = value
 
     def __getattr__(self, field):
@@ -523,7 +586,7 @@ class Data(object):
             return self.__dict__[field]
 
         try:
-            data = {field: self.__data[field]}
+            data = {field: self._data[field]}
         except:
             if field in self.fields.keys():
                 data = self._ooop.read(self._model, self._ref, [field])
@@ -570,6 +633,10 @@ class Data(object):
             else:
                 self.__dict__[name] = List(Manager(relation, self._ooop),
                                            data=self, model=relation)
+        elif ttype == "datetime" and data[name]:
+            self.__dict__[name] = datetime.strptime(data[name], "%Y-%m-%d %H:%M:%S")
+        elif ttype == "date" and data[name]:
+            self.__dict__[name] = date.fromordinal(datetime.strptime(data[name], "%Y-%m-%d").toordinal())
         else:
             # axelor conector workaround
             if type(data) == types.ListType:
@@ -587,8 +654,13 @@ class Data(object):
         for i in self.fields.values():
             name, ttype, relation = i['name'], i['ttype'], i['relation']
             if name in self.__dict__.keys(): # else keep values in original object
-                if not '2' in ttype:
-                    data[name] = self.__dict__[name]
+                if not '2' in ttype: # not one2many, many2one nor many2many
+                    if ttype == 'date' and self.__dict__[name]:
+                        data[name] = date.strftime(self.__dict__[name], '%Y-%m-%d')
+                    elif ttype == 'datetime' and self.__dict__[name]:
+                        data[name] = datetime.strftime(self.__dict__[name], '%Y-%m-%d %H:%M:%S')
+                    elif ttype in ('boolean', 'float', 'integer') or self.__dict__[name]:
+                        data[name] = self.__dict__[name]
                 elif ttype in ('one2many', 'many2many'):
                     if len(self.__dict__[name]) > 0:
                         data[name] = [(6, 0, [i.save() for i in self.__dict__[name]])]
@@ -606,7 +678,8 @@ class Data(object):
                         data[name] = self.__dict__[name]
 
         if self._ooop.debug:
-            print ">>> data: ", data
+            print ">>> model:", self._model
+            print ">>> data:", data
 
         # create or write the object
         if self._ref > 0 and not self._copy: # same object
