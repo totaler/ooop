@@ -33,7 +33,7 @@ except:
 
 __author__ = "Pedro Gracia <lasarux@neuroomante.com>"
 __license__ = "GPLv3+"
-__version__ = "0.2.0"
+__version__ = "0.2.1-xt"
 
 
 OOOPMODELS = 'ir.model'
@@ -57,20 +57,16 @@ OPERATORS = {
 
 class objectsock_mock():
     """mock for objectsock to be able to use the OOOP as a module inside of openerp"""
-    def __init__(self, parent, cr):
-        self.parent = parent
+    def __init__(self, pool, cr):
+        self.pool = pool
         self.cr = cr
     
-    def execute(self, *args):
+    def execute(self, uid, pwd, model, action, *args):
         """mocking execute function"""
-        uid = args[1]
-        model = args[3]
-        action = args[4]
         o_model = self.pool.get(model)
-        newargs = (self.cr, uid, )
-        if args[5:]:
-            newargs += args[5:]
-        return getattr(o_model, action)(*newargs)
+        newargs = (self.cr, uid, ) + args
+        res = getattr(o_model, action)(*newargs)
+        return res
         
 
 class OOOP:
@@ -85,15 +81,17 @@ class OOOP:
         self.debug = debug
         self.commonsock = None
         self.objectsock = None
+        self.transsock = None
         self.reportsock = None
         self.uid = None
         self.models = {}
         self.fields = {}
+        self.transaction_id = False
 
         #has to be uid, cr, parent (the openerp model to get the pool)
         if len(kwargs) == 3:
             self.uid = kwargs['uid']
-            self.objectsock = objectsock_mock(kwargs['parent'], kwargs['cr'])
+            self.objectsock = objectsock_mock(kwargs['pool'], kwargs['cr'])
         else:
             self.connect()
         
@@ -103,38 +101,73 @@ class OOOP:
         """login and sockets to xmlrpc services: common, object and report"""
         self.uid = self.login(self.dbname, self.user, self.pwd)
         self.objectsock = xmlrpclib.ServerProxy('%s:%i/xmlrpc/object' % (self.uri, self.port))
+        self.transsock = xmlrpclib.ServerProxy('%s:%i/xmlrpc/sync' % (self.uri, self.port))
         self.reportsock = xmlrpclib.ServerProxy('%s:%i/xmlrpc/report' % (self.uri, self.port))
+
+    def get_transaction(self, transaction_id):
+        self.transaction_id = self.transsock.get_transaction(self.dbname,
+                                                             transaction_id,
+                                                             self.uid, self.pwd)
+        # Reloading modules for transaction
+        self.load_models()
+        return self.transaction_id
     
+    def commit(self):
+        if self.transaction_id:
+            return self.transsock.commit(self.dbname, self.transaction_id,
+                                         self.uid, self.pwd)
+        elif hasattr(self.objectsock, 'cr'):
+            return self.objectsock.cr.commit()
+
+    def rollback(self):
+        if self.transaction_id:
+            return self.transsock.rollback(self.dbname, self.transaction_id,
+                                           self.uid, self.pwd)
+        elif hasattr(self.objectsock, 'cr'):
+            return self.objectsock.cr.rollback()
+
+    def close(self):
+        if self.transaction_id:
+            return self.transsock.close(self.dbname, self.transaction_id,
+                                        self.uid, self.pwd)
+        elif hasattr(self.objectsock, 'cr'):
+            return self.objectsock.cr.close()
+
     def login(self, dbname, user, pwd):
         self.commonsock = xmlrpclib.ServerProxy('%s:%i/xmlrpc/common' % (self.uri, self.port))
         return self.commonsock.login(dbname, user, pwd)
 
     def execute(self, model, *args):
-        return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, *args)
+        if self.transaction_id:
+            return self.transsock.execute(self.dbname, self.transaction_id,
+                                           self.uid, self.pwd, model, *args)
+        else:
+            return self.objectsock.execute(self.dbname, self.uid, self.pwd,
+                                           model, *args)
 
     def create(self, model, data):
         """ create a new register """
-        return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'create', data)
+        return self.execute(model, 'create', data)
 
     def unlink(self, model, ids):
         """ remove register """
-        return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'unlink', ids)
+        return self.execute(model, 'unlink', ids)
 
     def write(self, model, ids, value):
         """ update register """
-        return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'write', ids, value)
+        return self.execute(model, 'write', ids, value)
 
     def read(self, model, ids, fields=[]):
         """ update register """
-        return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'read', ids, fields)
+        return self.execute(model, 'read', ids, fields)
 
     def read_all(self, model, fields=[]):
         """ update register """
-        return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'read', self.all(model), fields)
+        return self.read(model, self.all(model), fields)
 
     def search(self, model, query):
         """ return ids that match with 'query' """
-        return self.objectsock.execute(self.dbname, self.uid, self.pwd, model, 'search', query)
+        return self.execute(model, 'search', query)
         
     def all(self, model):
         """ return all ids """
@@ -579,7 +612,7 @@ class Data(object):
 
         # create or write the object
         if self._ref > 0 and not self._copy: # same object
-            self._ooop.write(self._model, self._ref, data)
+            self._ooop.write(self._model, [self._ref], data)
         else:
             self._ref = self._ooop.create(self._model, data)
         
