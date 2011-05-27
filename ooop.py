@@ -61,16 +61,12 @@ class objectsock_mock():
         self.pool = pool
         self.cr = cr
     
-    def execute(self, *args):
+    def execute(self, uid, pwd, model, action, *args):
         """mocking execute function"""
-        uid = args[1]
-        model = args[3]
-        action = args[4]
         o_model = self.pool.get(model)
-        newargs = (self.cr, uid, )
-        if args[5:]:
-            newargs += args[5:]
-        return getattr(o_model, action)(*newargs)
+        newargs = (self.cr, uid, ) + args
+        res = getattr(o_model, action)(*newargs)
+        return res
         
 
 class OOOP:
