@@ -24,6 +24,7 @@ import xmlrpclib
 import time
 import base64
 import types
+import threading
 
 # check if pydot is installed
 try:
@@ -34,6 +35,36 @@ except:
 __author__ = "Pedro Gracia <lasarux@neuroomante.com>"
 __license__ = "GPLv3+"
 __version__ = "0.2.2-xt"
+
+class TimeoutException(Exception):
+    """Exception to raise on a timeout"""
+    pass 
+
+class TimeoutFunction: 
+
+    def __init__(self, function, timeout):
+        self.timeout = timeout
+        self.function = function       
+
+    def __call__(self, *args):
+        class InterruptableThread(threading.Thread):
+            def __init__(self, function):
+                threading.Thread.__init__(self)
+                self.result = None
+                self.function = function
+
+            def run(self):
+                try:
+                    self.result = self.function(*args)
+                except Exception, exc:
+                    raise exc
+        it = InterruptableThread(self.function)
+        it.start()
+        it.join(self.timeout)
+        if it.isAlive():
+           raise TimeoutException()
+        else:
+           return it.result 
 
 
 OOOPMODELS = 'ir.model'
@@ -138,6 +169,11 @@ class OOOP:
         return self.commonsock.login(dbname, user, pwd)
 
     def execute(self, model, *args):
+        function = TimeoutFunction(self.execute_timeout, 10)
+        return function(model, *args)
+
+
+    def execute_timeout(self, model, *args):
         if self.transaction_id:
             return self.transsock.execute(self.dbname, self.transaction_id,
                                            self.uid, self.pwd, model, *args)
