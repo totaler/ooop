@@ -62,9 +62,9 @@ class TimeoutFunction:
         it.start()
         it.join(self.timeout)
         if it.isAlive():
-           raise TimeoutException()
+            raise TimeoutException()
         else:
-           return it.result 
+            return it.result 
 
 
 OOOPMODELS = 'ir.model'
@@ -103,7 +103,8 @@ class objectsock_mock():
 class OOOP:
     """ Main class to manage xml-rpc comunitacion with openerp-server """
     def __init__(self, user='admin', pwd='admin', dbname='openerp', 
-                 uri='http://localhost', port=8069, debug=False, **kwargs):
+                 uri='http://localhost', port=8069, 
+                 debug=False, timeout=10, **kwargs):
         self.user = user       # default: 'admin'
         self.pwd = pwd         # default: 'admin'
         self.dbname = dbname   # default: 'openerp'
@@ -118,6 +119,7 @@ class OOOP:
         self.models = {}
         self.fields = {}
         self.transaction_id = False
+        self.timeout = timeout
 
         #has to be uid, cr, parent (the openerp model to get the pool)
         if len(kwargs) == 3:
@@ -169,9 +171,8 @@ class OOOP:
         return self.commonsock.login(dbname, user, pwd)
 
     def execute(self, model, *args):
-        function = TimeoutFunction(self.execute_timeout, 10)
+        function = TimeoutFunction(self.execute_timeout, self.timeout)
         return function(model, *args)
-
 
     def execute_timeout(self, model, *args):
         if self.transaction_id:
